@@ -116,6 +116,81 @@ def sandboxed_run_python_code(code_str: str) -> str:
     except Exception as e:
         return f"Error creating sandbox: {e}"
 
+# --- 4. Path Traversal Vulnerability ---
+
+# SAFE: Uses pathlib to resolve paths and prevent traversal attacks.
+def safe_read_document(filename: str) -> str:
+    """
+    SAFE: Reads a file only from within the 'documents' directory.
+    Uses pathlib to resolve the path and prevent directory traversal attacks.
+    """
+    print(f"Executing SAFE document read for: {filename}")
+    try:
+        base_dir = os.path.abspath("documents")
+        target_path = os.path.abspath(os.path.join(base_dir, filename))
+
+        # Security Check: Ensure the resolved path is still within the base directory
+        if not target_path.startswith(base_dir):
+            return "Error: Path traversal attempt detected."
+
+        with open(target_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Error: The specified document was not found."
+    except Exception as e:
+        return f"Error reading document: {e}"
+
+# --- 5. Server-Side Request Forgery (SSRF) ---
+import requests
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+# VULNERABLE: Fetches any URL provided, including internal and metadata IPs.
+def vulnerable_fetch_webpage(url: str) -> str:
+    """
+    VULNERABLE: Fetches the content of any URL.
+    An attacker can use this to scan internal networks or access cloud metadata services.
+    Example exploit: url = "http://169.254.169.254/latest/meta-data/"
+    """
+    print(f"Executing VULNERABLE webpage fetch for: {url}")
+    try:
+        response = requests.get(url, timeout=3)
+        return response.text[:500] # Return first 500 chars
+    except Exception as e:
+        return f"Error fetching URL: {e}"
+
+# SAFE: Validates the URL to ensure it's not an internal or reserved IP.
+def safe_fetch_webpage(url: str) -> str:
+    """
+    SAFE: Fetches a URL after validating it doesn't point to a private or reserved IP address.
+    This prevents SSRF attacks.
+    """
+    print(f"Executing SAFE webpage fetch for: {url}")
+    try:
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in ('http', 'https'):
+            return "Error: Invalid URL scheme. Only http and https are allowed."
+
+        hostname = parsed_url.hostname
+        if not hostname:
+            return "Error: Invalid hostname."
+
+        ip_str = socket.gethostbyname(hostname)
+        ip = ipaddress.ip_address(ip_str)
+
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return f"Error: SSRF attempt blocked. The IP {ip_str} is a non-public address."
+
+        response = requests.get(url, timeout=3)
+        return response.text[:500] # Return first 500 chars
+    except socket.gaierror:
+        return "Error: Could not resolve hostname."
+    except Exception as e:
+        return f"Error fetching URL: {e}"
+
+
+
 
 
 # --- Gemini Tool Declarations ---
@@ -182,6 +257,36 @@ ALL_TOOLS = types.Tool(
                 required=["code_str"],
             ),
         ),
+        # Safe Document Reading Tool (Path Traversal Safe)
+        types.FunctionDeclaration(
+            name="safe_read_document",
+            description="SAFE: Reads a file only from within the 'documents' directory, preventing path traversal.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"filename": types.Schema(type="STRING")},
+                required=["filename"],
+            ),
+        ),
+        # Vulnerable SSRF Tool
+        types.FunctionDeclaration(
+            name="vulnerable_fetch_webpage",
+            description="VULNERABLE: Fetches the content of any URL, allowing SSRF.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"url": types.Schema(type="STRING")},
+                required=["url"],
+            ),
+        ),
+        # Safe SSRF Tool
+        types.FunctionDeclaration(
+            name="safe_fetch_webpage",
+            description="SAFE: Fetches a URL after validating it's not a private or reserved IP.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"url": types.Schema(type="STRING")},
+                required=["url"],
+            ),
+        ),
     ]
 )
 
@@ -193,4 +298,7 @@ TOOL_FUNCTION_MAP = {
     "vulnerable_run_python_code": vulnerable_run_python_code,
     "safe_list_files": safe_list_files,
     "sandboxed_run_python_code": sandboxed_run_python_code,
+    "safe_read_document": safe_read_document,
+    "vulnerable_fetch_webpage": vulnerable_fetch_webpage,
+    "safe_fetch_webpage": safe_fetch_webpage,
 }
