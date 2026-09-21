@@ -109,12 +109,16 @@ All tools, both safe and vulnerable, are defined in `core/tools.py`.
     ```
 
 3.  **Run the server:**
+    The server will automatically reload when you make changes to the code.
     ```bash
-    uvicorn main:app --host 0.0.0.0 --port 8000
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ```
 
 4.  **Interact with the agent:**
-    You can send prompts to the agent using the `/chat` endpoint. Remember to URL-encode your prompt.
+    Use `curl` to send requests to the various API endpoints as described in the tests above.
     ```bash
-    curl -X POST "http://localhost:8000/chat?query=Your%20prompt%20here"
+    # Example for RAG test
+    curl -X POST "http://localhost:8000/rag_summarize" \
+    -H "Content-Type: application/json" \
+    -d '{"doc_ids": ["doc1", "doc2"], "user_query": "What is the CEO salary?"}'
     ```
