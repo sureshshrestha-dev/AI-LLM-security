@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive AI & LLM Security CTF Arena — learn and practice AI security vulnerabilities with side-by-side safe vs vulnerable code labs.">
+  <title>AI & LLM Security CTF Arena</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       HEADER — Glassmorphic Sticky Nav
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <header class="app-header">
+    <div class="logo-container">
+      <div class="logo-icon" aria-hidden="true">🛡️</div>
+      <span class="logo-title">AI Security Arena</span>
+    </div>
+
+    <nav class="nav-tabs" role="tablist" aria-label="Main Navigation">
+      <button class="nav-tab active" role="tab" data-tab="challenges" aria-selected="true" onclick="switchTab('challenges')">🎯 CTF Challenges</button>
+      <button class="nav-tab" role="tab" data-tab="learning" aria-selected="false" onclick="switchTab('learning')">📚 Learn &amp; Review</button>
+      <a href="/docs" target="_blank" rel="noopener" class="nav-tab" style="text-decoration:none;">⚡ API Docs</a>
+    </nav>
+
+    <div class="header-actions">
+      <div class="scoreboard-badge" id="scoreboardDisplay">
+        <span>🏆</span>
+        <span id="userScore">0</span> pts
+        <span style="opacity:.4">|</span>
+        <span id="solvedCount">0</span>/6 solved
+      </div>
+      <button class="auth-btn" id="authBtn" onclick="openAuthModal()">Login / Register</button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       MAIN CONTENT
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <main class="main-container">
+
+    <!-- ─── TAB 1: CTF Challenges ─────────────────────────────────────── -->
+    <section id="tab-challenges" class="tab-content active" role="tabpanel">
+      <div class="ctf-grid">
+
+        <!-- Sidebar -->
+        <aside class="sidebar-panel" aria-label="Challenge List">
+          <div class="panel-title">🎯 Security Lab Challenges</div>
+          <div class="challenge-list" id="challengeList"></div>
+        </aside>
+
+        <!-- Workspace -->
+        <div class="challenge-detail-panel" id="challengeDetailPanel">
+
+          <!-- Hero Card -->
+          <div class="challenge-hero">
+            <div class="challenge-hero-top">
+              <div>
+                <div class="challenge-number" id="chNumber">Challenge 1 of 6</div>
+                <h1 class="challenge-title-text" id="chTitle">Select a Challenge</h1>
+              </div>
+              <div class="challenge-badges-row" id="chBadges">
+                <span class="badge badge-medium" id="chDifficulty">Medium</span>
+                <span class="badge badge-pts" id="chPoints">100 pts</span>
+              </div>
+            </div>
+            <p class="challenge-description" id="chDescription">Pick a challenge from the sidebar to explore its vulnerable and safe implementations side-by-side.</p>
+
+            <div class="action-bar">
+              <span class="action-label">Quick Actions</span>
+              <button class="action-btn" id="presetBtn" onclick="applyPresetPayload()">⚡ Load Exploit Payload</button>
+              <button class="action-btn hint-btn" id="hintBtn" onclick="showHint()">💡 Show Hint</button>
+            </div>
+          </div>
+
+          <!-- Side-by-Side Labs -->
+          <div class="lab-split-grid">
+
+            <!-- Vulnerable Column -->
+            <div class="lab-column vulnerable">
+              <div class="lab-column-header">
+                <div class="column-title"><span class="icon">💀</span> Vulnerable Mode</div>
+                <span class="badge badge-hard">Insecure</span>
+              </div>
+              <div class="lab-column-body">
+                <div class="payload-group">
+                  <input type="text" id="vulnInput" class="payload-input" placeholder="Enter exploit payload…" autocomplete="off" spellcheck="false">
+                </div>
+                <button class="execute-btn vulnerable-btn" id="vulnExecBtn" onclick="executeLab('vulnerable')">
+                  <span>▶</span> Run Vulnerable
+                </button>
+
+                <div class="section-label"><span class="dot"></span> Source Code</div>
+                <pre class="code-box" id="vulnCodeSnippet"></pre>
+
+                <div class="section-label"><span class="dot"></span> Execution Output</div>
+                <div class="output-box" id="vulnOutput">Click "Run Vulnerable" to test the insecure implementation…</div>
+              </div>
+            </div>
+
+            <!-- Safe Column -->
+            <div class="lab-column safe">
+              <div class="lab-column-header">
+                <div class="column-title"><span class="icon">🛡️</span> Safe / Secure Mode</div>
+                <span class="badge badge-solved">Protected</span>
+              </div>
+              <div class="lab-column-body">
+                <div class="payload-group">
+                  <input type="text" id="safeInput" class="payload-input" placeholder="Enter the same payload…" autocomplete="off" spellcheck="false">
+                </div>
+                <button class="execute-btn safe-btn" id="safeExecBtn" onclick="executeLab('safe')">
+                  <span>▶</span> Run Safe
+                </button>
+
+                <div class="section-label"><span class="dot"></span> Source Code</div>
+                <pre class="code-box" id="safeCodeSnippet"></pre>
+
+                <div class="section-label"><span class="dot"></span> Execution Output</div>
+                <div class="output-box" id="safeOutput">Click "Run Safe" to test the secure implementation…</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Explanation Card -->
+          <div class="action-bar" id="explanationBar" style="display:none;">
+            <span class="action-label">🧠 Why It Matters</span>
+            <span id="explanationText" style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5;"></span>
+          </div>
+
+          <!-- Terminal Console -->
+          <div class="terminal-card">
+            <div class="terminal-titlebar">
+              <div class="terminal-dots"><span></span><span></span><span></span></div>
+              <span class="terminal-titlebar-text">trace-console — diagnostic logs</span>
+            </div>
+            <div class="terminal-logs" id="terminalLogs">$ Awaiting execution traces…</div>
+          </div>
+
+          <!-- Flag Submit -->
+          <div class="flag-bar">
+            <span class="flag-icon">🚩</span>
+            <div class="flag-input-wrap">
+              <input type="text" id="flagInput" class="flag-input" placeholder="FLAG{paste_captured_flag_here}" autocomplete="off" spellcheck="false">
+            </div>
+            <button class="submit-flag-btn" onclick="submitFlag()">Submit Flag</button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB 2: Learn & Review ─────────────────────────────────────── -->
+    <section id="tab-learning" class="tab-content" role="tabpanel">
+      <div class="learning-grid">
+
+        <aside class="sidebar-panel" aria-label="Topic List">
+          <div class="panel-title">📚 Security Theory</div>
+          <div class="challenge-list" id="learningTopicList"></div>
+        </aside>
+
+        <article class="learning-article" id="learningArticle">
+          <div id="learningDetailContent" class="md">
+            <h1>Welcome to the Learning Hub</h1>
+            <p>Select a topic from the sidebar to explore detailed breakdowns of AI/LLM vulnerabilities, OWASP mappings, attack mechanics, and secure coding practices.</p>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       AUTH MODAL
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="authModal" role="dialog" aria-modal="true" aria-label="Authentication">
+    <div class="modal-card">
+      <div class="modal-title">🔐 Authentication</div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab active" id="loginTab" onclick="toggleAuthMode('login')">Login</button>
+        <button class="modal-tab" id="registerTab" onclick="toggleAuthMode('register')">Register</button>
+      </div>
+
+      <form id="authForm" onsubmit="handleAuthSubmit(event)">
+        <div class="form-group">
+          <label class="form-label" for="authUsername">Username</label>
+          <input type="text" id="authUsername" class="form-input" required minlength="3" maxlength="50">
+        </div>
+        <div class="form-group" id="emailGroup" style="display: none;">
+          <label class="form-label" for="authEmail">Email</label>
+          <input type="email" id="authEmail" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="authPassword">Password</label>
+          <input type="password" id="authPassword" class="form-input" required minlength="6">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" onclick="closeAuthModal()">Cancel</button>
+          <button type="submit" class="auth-btn">Continue →</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Celebration Overlay -->
+  <div class="celebration-overlay" id="celebrationOverlay">
+    <div class="celebration-text" id="celebrationText">🎉 FLAG CAPTURED!</div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

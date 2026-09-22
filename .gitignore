@@ -1,4 +1,44 @@
+# Environment & Virtual Environments
 .env
+.env.*
 .venv/
+venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# SQLite Databases & Local Storage
+*.db
+*.sqlite
+*.sqlite3
+security_lab.db
+
+# Temporary Execution Scripts
+temp_script.py
+temp_host_script.py
+temp_exploit.py
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Agent & IDE Workspaces
 .kilo/
+.gemini/

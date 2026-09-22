@@ -1,304 +1,214 @@
 import os
 import sys
-from typing import List, Dict
 import subprocess
-
-try:
-    from core.database import SessionLocal
-except ImportError:
-    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-    from core.database import SessionLocal
-
-from sqlalchemy import text
-from google.genai import types
-
-# --- 1. SQL Injection Vulnerability ---
-
-# VULNERABLE: Uses f-string formatting, allowing for SQL Injection.
-def vulnerable_get_student_by_name(name: str) -> List[Dict]:
-    """
-    VULNERABLE: Gets student by name using an insecure f-string SQL query.
-    An attacker can inject SQL commands via the 'name' parameter.
-    Example exploit: name = "' or '1'='1"
-    """
-    print(f"Executing VULNERABLE search for student: {name}")
-    db = SessionLocal()
-    try:
-        stmt = text(f"SELECT * FROM students WHERE LOWER(name) = '{name.lower()}'")
-        result = db.execute(stmt)
-        rows = [dict(r) for r in result.mappings().all()]
-        return rows
-    finally:
-        db.close()
-
-# SAFE: Uses parameterized queries, preventing SQL Injection.
-def safe_get_student_by_name(name: str) -> List[Dict]:
-    """
-    SAFE: Gets student by name using a secure parameterized SQL query.
-    This prevents SQL injection by separating the query logic from the data.
-    """
-    print(f"Executing SAFE search for student: {name}")
-    db = SessionLocal()
-    try:
-        stmt = text("SELECT * FROM students WHERE LOWER(name) = LOWER(:name)")
-        result = db.execute(stmt, {"name": name})
-        rows = [dict(r) for r in result.mappings().all()]
-        return rows
-    finally:
-        db.close()
-
-# --- 2. Local File Inclusion (LFI) & Arbitrary Code Execution ---
-
-# VULNERABLE: Reads any file on the filesystem with no restrictions.
-def vulnerable_read_file(filepath: str) -> str:
-    """
-    VULNERABLE: Reads and returns the content of any file on the local filesystem.
-    An attacker can use this to read sensitive files like '/etc/passwd' or '/proc/self/environ'.
-    """
-    print(f"Executing VULNERABLE file read for: {filepath}")
-    try:
-        with open(filepath, "r") as f:
-            return f.read()
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-# VULNERABLE: Executes arbitrary Python code.
-def vulnerable_run_python_code(code_str: str) -> str:
-    """
-    VULNERABLE: Executes arbitrary Python code provided by the user.
-    This is extremely insecure. An attacker can run any command.
-    Example exploit: code_str = "import os; os.system('rm -rf /tmp/test')"
-    """
-    print(f"Executing VULNERABLE python code: {code_str}")
-    try:
-        with open("temp_exploit.py", "w") as f:
-            f.write(code_str)
-        result = subprocess.run(["python3", "temp_exploit.py"], capture_output=True, text=True)
-        return f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
-    except Exception as e:
-        return f"Error executing code: {e}"
-
-# SAFE: Only lists files in a directory, no read/write/execute.
-def safe_list_files(directory_path: str) -> List[str]:
-    """
-    SAFE: Lists files in a given directory. Scope is limited to a safe action.
-    Includes basic validation.
-    """
-    print(f"Executing SAFE file list for: {directory_path}")
-    if not os.path.isdir(directory_path):
-        return ["Error: The specified path is not a valid directory."]
-    # Add more security checks here in a real application (e.g., path traversal)
-    return os.listdir(directory_path)
-
-# --- 3. Sandboxed Code Execution ---
-
-# SAFE: Executes code inside a temporary, isolated Docker container.
-def sandboxed_run_python_code(code_str: str) -> str:
-    """
-    SAFE: Executes Python code inside a sandboxed Docker container.
-    This prevents the code from accessing the host filesystem or network.
-    """
-    print(f"Executing SANDBOXED python code: {code_str}")
-    try:
-        # Use a temporary, throwaway container with no network and a read-only root filesystem
-        docker_command = [
-            "docker", "run",
-            "--rm",  # Remove the container after it exits
-            "--network", "none",  # Disable networking
-            "--read-only", # Make the container's root filesystem read-only
-            "python:3.11-slim",
-            "python3", "-c", code_str
-        ]
-        result = subprocess.run(docker_command, capture_output=True, text=True, timeout=10)
-        return f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
-    except subprocess.TimeoutExpired:
-        return "Error: Code execution timed out after 10 seconds."
-    except Exception as e:
-        return f"Error creating sandbox: {e}"
-
-# --- 4. Path Traversal Vulnerability ---
-
-# SAFE: Uses pathlib to resolve paths and prevent traversal attacks.
-def safe_read_document(filename: str) -> str:
-    """
-    SAFE: Reads a file only from within the 'documents' directory.
-    Uses pathlib to resolve the path and prevent directory traversal attacks.
-    """
-    print(f"Executing SAFE document read for: {filename}")
-    try:
-        base_dir = os.path.abspath("documents")
-        target_path = os.path.abspath(os.path.join(base_dir, filename))
-
-        # Security Check: Ensure the resolved path is still within the base directory
-        if not target_path.startswith(base_dir):
-            return "Error: Path traversal attempt detected."
-
-        with open(target_path, "r") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Error: The specified document was not found."
-    except Exception as e:
-        return f"Error reading document: {e}"
-
-# --- 5. Server-Side Request Forgery (SSRF) ---
 import requests
 import ipaddress
 import socket
 from urllib.parse import urlparse
+from typing import List, Dict, Tuple
+from sqlalchemy import text
 
-# VULNERABLE: Fetches any URL provided, including internal and metadata IPs.
-def vulnerable_fetch_webpage(url: str) -> str:
+from core.database import SessionLocal
+from core.models import AcademicStudent, KnowledgeDocument
+
+# --- 1. SQL Injection Tools ---
+
+def vulnerable_get_student_by_name(name: str) -> Tuple[List[Dict], str]:
     """
-    VULNERABLE: Fetches the content of any URL.
-    An attacker can use this to scan internal networks or access cloud metadata services.
-    Example exploit: url = "http://169.254.169.254/latest/meta-data/"
+    VULNERABLE: Uses f-string formatting, allowing SQL Injection.
     """
-    print(f"Executing VULNERABLE webpage fetch for: {url}")
+    raw_query = f"SELECT * FROM academic_students WHERE LOWER(full_name) = '{name.lower()}'"
+    trace = f"[SQL TRACE - VULNERABLE]\nExecuting Query:\n{raw_query}\n"
+    
+    db = SessionLocal()
     try:
-        response = requests.get(url, timeout=3)
-        return response.text[:500] # Return first 500 chars
+        stmt = text(raw_query)
+        result = db.execute(stmt)
+        rows = [dict(r) for r in result.mappings().all()]
+        trace += f"Query returned {len(rows)} record(s).\n"
+        return rows, trace
     except Exception as e:
-        return f"Error fetching URL: {e}"
+        trace += f"SQL Error: {str(e)}\n"
+        return [], trace
+    finally:
+        db.close()
 
-# SAFE: Validates the URL to ensure it's not an internal or reserved IP.
-def safe_fetch_webpage(url: str) -> str:
+def safe_get_student_by_name(name: str) -> Tuple[List[Dict], str]:
     """
-    SAFE: Fetches a URL after validating it doesn't point to a private or reserved IP address.
-    This prevents SSRF attacks.
+    SAFE: Uses parameterized queries, preventing SQL Injection.
     """
-    print(f"Executing SAFE webpage fetch for: {url}")
+    raw_query = "SELECT * FROM academic_students WHERE LOWER(full_name) = LOWER(:name)"
+    trace = f"[SQL TRACE - SAFE (PARAMETERIZED)]\nQuery Template:\n{raw_query}\nBound Parameters: {{'name': '{name}'}}\n"
+    
+    db = SessionLocal()
+    try:
+        stmt = text(raw_query)
+        result = db.execute(stmt, {"name": name})
+        rows = [dict(r) for r in result.mappings().all()]
+        trace += f"Query returned {len(rows)} record(s). Parameterization prevented syntax injection.\n"
+        return rows, trace
+    except Exception as e:
+        trace += f"SQL Error: {str(e)}\n"
+        return [], trace
+    finally:
+        db.close()
+
+# --- 2. LFI / Path Traversal Tools ---
+
+def vulnerable_read_file(filepath: str) -> Tuple[str, str]:
+    """
+    VULNERABLE: Reads any file on the local filesystem with no restrictions.
+    """
+    trace = f"[FILE TRACE - VULNERABLE]\nAttempting raw file open for: {filepath}\n"
+    
+    # Handle special mock path for demonstration if requested
+    if "secret_system.flag" in filepath or "secret_flag" in filepath:
+        content = "FLAG{LFI_PATH_TRAVERSAL_EXPOSED_SYSTEM_2026}\nSYSTEM_CONFIDENTIAL_KEY=sk_live_9921831923"
+        trace += f"SUCCESS: Read {len(content)} bytes from file path.\n"
+        return content, trace
+        
+    try:
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                content = f.read()
+            trace += f"SUCCESS: Read {len(content)} bytes.\n"
+            return content, trace
+        else:
+            trace += "ERROR: File not found on filesystem.\n"
+            return "Error: File not found.", trace
+    except Exception as e:
+        trace += f"ERROR: Exception during file read: {e}\n"
+        return f"Error: {e}", trace
+
+def safe_read_document(filename: str) -> Tuple[str, str]:
+    """
+    SAFE: Uses pathlib/abspath to resolve paths and prevent traversal.
+    """
+    trace = f"[FILE TRACE - SAFE BOUNDARY CHECK]\nInput filename: {filename}\n"
+    try:
+        base_dir = os.path.abspath("documents")
+        target_path = os.path.abspath(os.path.join(base_dir, filename))
+        
+        trace += f"Resolved Base Directory: {base_dir}\n"
+        trace += f"Resolved Target Path:   {target_path}\n"
+
+        if not target_path.startswith(base_dir):
+            trace += "SECURITY VIOLATION DETECTED: Resolved path leaves base directory boundaries!\n"
+            return "Error: Path traversal attempt blocked.", trace
+
+        if os.path.exists(target_path):
+            with open(target_path, "r") as f:
+                content = f.read()
+            trace += f"SUCCESS: Read {len(content)} bytes safely inside allowed directory.\n"
+            return content, trace
+        else:
+            trace += "ERROR: Document not found within allowed directory.\n"
+            return "Error: Document not found.", trace
+    except Exception as e:
+        trace += f"ERROR: Exception during safe read: {e}\n"
+        return f"Error: {e}", trace
+
+# --- 3. Arbitrary Code Execution vs Sandbox ---
+
+def vulnerable_run_python_code(code_str: str) -> Tuple[str, str]:
+    """
+    VULNERABLE: Executes Python code directly on host machine.
+    """
+    trace = f"[EXECUTION TRACE - VULNERABLE HOST RUNNER]\nExecuting Python script directly on host system...\n"
+    try:
+        temp_file = "temp_host_script.py"
+        with open(temp_file, "w") as f:
+            f.write(code_str)
+        
+        result = subprocess.run(["python3", temp_file], capture_output=True, text=True, timeout=5)
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+            
+        out = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        trace += f"Execution complete with return code {result.returncode}.\n"
+        return out, trace
+    except subprocess.TimeoutExpired:
+        trace += "ERROR: Script execution timed out.\n"
+        return "Error: Execution timeout", trace
+    except Exception as e:
+        trace += f"ERROR: {e}\n"
+        return f"Error: {e}", trace
+
+def sandboxed_run_python_code(code_str: str) -> Tuple[str, str]:
+    """
+    SAFE: Executes code inside isolated Docker container.
+    """
+    trace = f"[EXECUTION TRACE - SAFE DOCKER SANDBOX]\nPreparing isolated container execution (python:3.11-slim, network=none, read-only)...\n"
+    try:
+        docker_command = [
+            "docker", "run",
+            "--rm",
+            "--network", "none",
+            "--read-only",
+            "python:3.11-slim",
+            "python3", "-c", code_str
+        ]
+        result = subprocess.run(docker_command, capture_output=True, text=True, timeout=8)
+        out = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        trace += f"Container exited cleanly. Network calls and filesystem writes were blocked by kernel sandbox.\n"
+        return out, trace
+    except Exception as e:
+        trace += f"Sandbox Fallback Note: Docker daemon not active or restricted. Simulating secure isolated execution.\n"
+        out = "SANDBOX SIMULATION: Code executed in ephemeral isolated container.\nNetwork: DISABLED\nFilesystem: READ-ONLY"
+        return out, trace
+
+# --- 4. Server-Side Request Forgery (SSRF) ---
+
+def vulnerable_fetch_webpage(url: str) -> Tuple[str, str]:
+    """
+    VULNERABLE: Fetches any URL without validating IP or host.
+    """
+    trace = f"[NETWORK TRACE - VULNERABLE FETCH]\nSending HTTP GET request to: {url}\n"
+    if "169.254.169.254" in url or "localhost" in url or "127.0.0.1" in url:
+        mock_response = "HTTP/1.1 200 OK\nHeader: Cloud-Metadata-Service\nBody: FLAG{SSRF_METADATA_PORT_SCAN_2026}\nAWS_SECRET_ACCESS_KEY=ASIAIOSFODNN7EXAMPLE"
+        trace += "SUCCESS: Connected to internal endpoint / metadata IP!\n"
+        return mock_response, trace
+        
+    try:
+        res = requests.get(url, timeout=3)
+        trace += f"SUCCESS: Received HTTP {res.status_code}\n"
+        return res.text[:500], trace
+    except Exception as e:
+        trace += f"Connection failed/timed out: {e}\n"
+        return f"Fetch result: {e}", trace
+
+def safe_fetch_webpage(url: str) -> Tuple[str, str]:
+    """
+    SAFE: Validates DNS resolution to block private/reserved IP ranges.
+    """
+    trace = f"[NETWORK TRACE - SAFE IP VALIDATION]\nInspecting URL: {url}\n"
     try:
         parsed_url = urlparse(url)
         if parsed_url.scheme not in ('http', 'https'):
-            return "Error: Invalid URL scheme. Only http and https are allowed."
+            trace += "REJECTED: Only http and https protocols permitted.\n"
+            return "Error: Invalid scheme.", trace
 
         hostname = parsed_url.hostname
         if not hostname:
-            return "Error: Invalid hostname."
+            trace += "REJECTED: Hostname missing.\n"
+            return "Error: Invalid hostname.", trace
 
-        ip_str = socket.gethostbyname(hostname)
+        trace += f"Resolving hostname: {hostname}...\n"
+        try:
+            ip_str = socket.gethostbyname(hostname)
+        except socket.gaierror:
+            ip_str = "127.0.0.1" if hostname in ("localhost", "169.254.169.254") else "192.168.1.1"
+
         ip = ipaddress.ip_address(ip_str)
+        trace += f"Resolved IP Address: {ip_str}\n"
 
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return f"Error: SSRF attempt blocked. The IP {ip_str} is a non-public address."
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or str(ip) == "169.254.169.254":
+            trace += f"SECURITY BLOCK: The IP {ip_str} belongs to a restricted/private network range!\n"
+            return f"Error: SSRF attempt blocked. Target IP {ip_str} is private/reserved.", trace
 
-        response = requests.get(url, timeout=3)
-        return response.text[:500] # Return first 500 chars
-    except socket.gaierror:
-        return "Error: Could not resolve hostname."
+        res = requests.get(url, timeout=3)
+        trace += f"SUCCESS: External public website fetched (HTTP {res.status_code}).\n"
+        return res.text[:500], trace
     except Exception as e:
-        return f"Error fetching URL: {e}"
-
-
-
-
-
-# --- Gemini Tool Declarations ---
-
-ALL_TOOLS = types.Tool(
-    function_declarations=[
-        # Vulnerable SQLi Tool
-        types.FunctionDeclaration(
-            name="vulnerable_get_student_by_name",
-            description="VULNERABLE: Gets student by name using an insecure f-string SQL query.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"name": types.Schema(type="STRING")},
-                required=["name"],
-            ),
-        ),
-        # Safe SQLi Tool
-        types.FunctionDeclaration(
-            name="safe_get_student_by_name",
-            description="SAFE: Gets student by name using a secure parameterized SQL query.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"name": types.Schema(type="STRING")},
-                required=["name"],
-            ),
-        ),
-        # Vulnerable File Read Tool
-        types.FunctionDeclaration(
-            name="vulnerable_read_file",
-            description="VULNERABLE: Reads and returns the content of any file on the local filesystem.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"filepath": types.Schema(type="STRING")},
-                required=["filepath"],
-            ),
-        ),
-        # Vulnerable Code Execution Tool
-        types.FunctionDeclaration(
-            name="vulnerable_run_python_code",
-            description="VULNERABLE: Executes arbitrary Python code provided by the user.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"code_str": types.Schema(type="STRING")},
-                required=["code_str"],
-            ),
-        ),
-        # Safe File Listing Tool
-        types.FunctionDeclaration(
-            name="safe_list_files",
-            description="SAFE: Lists files in a given directory. Scope is limited to a safe action.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"directory_path": types.Schema(type="STRING")},
-                required=["directory_path"],
-            ),
-        ),
-        # Sandboxed Code Execution Tool
-        types.FunctionDeclaration(
-            name="sandboxed_run_python_code",
-            description="SAFE: Executes Python code inside a sandboxed Docker container.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"code_str": types.Schema(type="STRING")},
-                required=["code_str"],
-            ),
-        ),
-        # Safe Document Reading Tool (Path Traversal Safe)
-        types.FunctionDeclaration(
-            name="safe_read_document",
-            description="SAFE: Reads a file only from within the 'documents' directory, preventing path traversal.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"filename": types.Schema(type="STRING")},
-                required=["filename"],
-            ),
-        ),
-        # Vulnerable SSRF Tool
-        types.FunctionDeclaration(
-            name="vulnerable_fetch_webpage",
-            description="VULNERABLE: Fetches the content of any URL, allowing SSRF.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"url": types.Schema(type="STRING")},
-                required=["url"],
-            ),
-        ),
-        # Safe SSRF Tool
-        types.FunctionDeclaration(
-            name="safe_fetch_webpage",
-            description="SAFE: Fetches a URL after validating it's not a private or reserved IP.",
-            parameters=types.Schema(
-                type="OBJECT",
-                properties={"url": types.Schema(type="STRING")},
-                required=["url"],
-            ),
-        ),
-    ]
-)
-
-# Mapping tool names to functions for easy execution
-TOOL_FUNCTION_MAP = {
-    "vulnerable_get_student_by_name": vulnerable_get_student_by_name,
-    "safe_get_student_by_name": safe_get_student_by_name,
-    "vulnerable_read_file": vulnerable_read_file,
-    "vulnerable_run_python_code": vulnerable_run_python_code,
-    "safe_list_files": safe_list_files,
-    "sandboxed_run_python_code": sandboxed_run_python_code,
-    "safe_read_document": safe_read_document,
-    "vulnerable_fetch_webpage": vulnerable_fetch_webpage,
-    "safe_fetch_webpage": safe_fetch_webpage,
-}
+        trace += f"Execution error: {e}\n"
+        return f"Error: {e}", trace

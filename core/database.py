@@ -1,13 +1,21 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# PostgreSQL URL with automatic fallback to local SQLite database
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    DATABASE_URL = "sqlite:///./security_lab.db"
 
-engine = create_engine(DATABASE_URL)
+# Adjust connect_args for SQLite
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -15,14 +23,11 @@ SessionLocal = sessionmaker(
     autocommit=False,
 )
 
-
 class Base(DeclarativeBase):
     pass
 
-
 def get_db():
     db = SessionLocal()
-
     try:
         yield db
     finally:
